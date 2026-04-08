@@ -33,7 +33,10 @@ Build a log viewer that fetches data from the provided API endpoint and addresse
 - Data transformation for nested OTLP types
 - Component architecture and TypeScript usage
 - UI/UX consistent with observability domain conventions
+- Visual polish and usability — with modern tooling the bar for a well-crafted interface is higher than ever
 - Production-ready code organization
+
+> The requirements above are a starting point. We love seeing what engineers choose to do when given room to make something their own.
 
 ---
 
