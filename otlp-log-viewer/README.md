@@ -6,6 +6,7 @@
 |---|---|
 | **Time** | 3-4 hours (submit what you have) |
 | **Stack** | React, TypeScript, Next.js (App Router) |
+| **OTLP Version** | `@opentelemetry/otlp-transformer@^0.203.0` |
 | **Submit** | Public GitHub repo + README |
 | **Bonus** | Vercel deployment |
 
@@ -75,13 +76,8 @@ GET https://take-home-assignment-otlp-logs-api.vercel.app/api/logs
 ```
 
 **TypeScript Types:**
-```typescript
-import {
-  IExportLogsServiceRequest,
-  IResourceLogs,
-  ILogRecord,
-} from "@opentelemetry/otlp-transformer";
-```
+
+The response conforms to the [OTLP Logs protobuf schema](https://github.com/open-telemetry/opentelemetry-proto/blob/main/opentelemetry/proto/logs/v1/logs.proto). The `@opentelemetry/otlp-transformer` package (version noted above) is a good starting point for TypeScript types.
 
 **Data Structure:**
 ```
