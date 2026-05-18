@@ -413,8 +413,10 @@ function generatedMockedData(): IExportLogsServiceRequest {
 							},
 							logRecords: faker.date
 								.betweens({
-									from: new Date("2024-01-01"),
-									to: new Date("2024-01-31"),
+									from: new Date(
+										Date.now() - 24 * 60 * 60 * 1000
+									),
+									to: new Date(),
 									count: faker.number.int({
 										min: 5,
 										max: 50,
