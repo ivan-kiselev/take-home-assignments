@@ -72,7 +72,7 @@ During the interview, walk us through:
 
 **Endpoint:**
 ```
-GET https://take-home-assignment-otlp-logs-api.vercel.app/api/logs
+GET https://take-home-assignment-otlp-logs-api.vercel.app/api/v2/logs
 ```
 
 **TypeScript Types:**

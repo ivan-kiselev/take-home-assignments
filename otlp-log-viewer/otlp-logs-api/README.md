@@ -9,7 +9,7 @@
 The API is already deployed and available at:
 
 ```
-https://take-home-assignment-otlp-logs-api.vercel.app/api/logs
+https://take-home-assignment-otlp-logs-api.vercel.app/api/v2/logs
 ```
 
 You can use this endpoint directly in your application without running the server locally.
@@ -23,7 +23,7 @@ npm install
 npm run dev
 ```
 
-The server will be available at `http://localhost:3000/api/logs`.
+The server will be available at `http://localhost:3000/api/v2/logs`.
 
 ## API Details
 
