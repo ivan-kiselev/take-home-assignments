@@ -33,7 +33,10 @@ Build a log viewer that fetches data from the provided API endpoint and addresse
 - Data transformation for nested OTLP types
 - Component architecture and TypeScript usage
 - UI/UX consistent with observability domain conventions
+- Visual polish and usability — with modern tooling the bar for a well-crafted interface is higher than ever
 - Production-ready code organization
+
+> The requirements above are a starting point. We love seeing what engineers choose to do when given room to make something their own.
 
 ---
 
@@ -68,17 +71,13 @@ During the interview, walk us through:
 
 **Endpoint:**
 ```
-GET https://take-home-assignment-otlp-logs-api.vercel.app/api/logs
+GET https://take-home-assignment-otlp-logs-api.vercel.app/api/v2/logs
 ```
 
 **TypeScript Types:**
-```typescript
-import {
-  IExportLogsServiceRequest,
-  IResourceLogs,
-  ILogRecord,
-} from "@opentelemetry/otlp-transformer";
-```
+
+The response conforms to the [OTLP Logs protobuf schema](https://github.com/open-telemetry/opentelemetry-proto/blob/main/opentelemetry/proto/logs/v1/logs.proto).
+You can use it to generate the necessary types
 
 **Data Structure:**
 ```
