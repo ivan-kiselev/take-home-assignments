@@ -1,6 +1,6 @@
 MODULE := dash0.com/otlp-log-processor-backend
 
-.PHONY: build run test test-integration test-all fmt vet lint tidy clean
+.PHONY: build run test test-integration test-all loadtest fmt vet lint tidy clean
 
 build:
 	go build ./...
@@ -15,6 +15,12 @@ test-integration:
 	go test -tags integration -count=1 -v ./...
 
 test-all: test test-integration
+
+# Load test against a throwaway ClickHouse (testcontainers). Writes artifacts to bench/.
+# Tune via env: LOAD_SERVICES, LOAD_METRICS, LOAD_ATTR_COMBOS, LOAD_DATAPOINTS, LOAD_DP_PER_REQ, LOAD_WORKERS.
+# Override LOAD_LABEL / LOAD_SCHEMA to name the artifact (e.g. baseline vs after).
+loadtest:
+	go test -tags loadtest -count=1 -v -timeout 30m -run TestLoadBaseline .
 
 fmt:
 	go fmt ./...

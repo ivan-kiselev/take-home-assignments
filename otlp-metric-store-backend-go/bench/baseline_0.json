@@ -1,0 +1,47 @@
+{
+  "label": "baseline",
+  "schema": "wide-row (metadata duplicated per datapoint)",
+  "config": {
+    "Services": 20,
+    "MetricsPerService": 10,
+    "AttrCombosPerMetric": 10,
+    "DatapointsPerSeries": 200,
+    "DatapointsPerRequest": 100,
+    "Workers": 8
+  },
+  "total_series": 2000,
+  "total_datapoints": 400000,
+  "total_requests": 4000,
+  "ingest_seconds": 91.222616875,
+  "datapoints_per_sec": 4384.87749751917,
+  "requests_per_sec": 43.8487749751917,
+  "rpc_latency_ms": {
+    "p50": 213.592,
+    "p95": 225.095,
+    "p99": 227.47,
+    "max": 229.679
+  },
+  "storage": [
+    {
+      "table": "otel_metrics_gauge",
+      "rows": 200000,
+      "compressed_bytes": 1014749,
+      "uncompressed_bytes": 42768318
+    },
+    {
+      "table": "otel_metrics_sum",
+      "rows": 200000,
+      "compressed_bytes": 1017832,
+      "uncompressed_bytes": 43769683
+    }
+  ],
+  "total_compressed_bytes": 2032581,
+  "total_uncompressed_bytes": 86538001,
+  "compressed_bytes_per_datapoint": 5.0814525,
+  "query_latency_ms": {
+    "p50": 2.883,
+    "p95": 4.474,
+    "p99": 4.474,
+    "max": 16.329
+  }
+}
