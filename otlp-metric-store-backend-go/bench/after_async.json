@@ -1,0 +1,54 @@
+{
+  "label": "after_async",
+  "schema": "split + async batched writer",
+  "config": {
+    "Services": 20,
+    "MetricsPerService": 10,
+    "AttrCombosPerMetric": 10,
+    "DatapointsPerSeries": 200,
+    "DatapointsPerRequest": 100,
+    "Workers": 8
+  },
+  "total_series": 2000,
+  "total_datapoints": 400000,
+  "total_requests": 4000,
+  "ingest_seconds": 1.483255958,
+  "datapoints_per_sec": 269676.9885484593,
+  "requests_per_sec": 2696.769885484593,
+  "rpc_latency_ms": {
+    "p50": 0.314,
+    "p95": 0.769,
+    "p99": 109.074,
+    "max": 268.978
+  },
+  "storage": [
+    {
+      "table": "otel_metrics_meta",
+      "rows": 2000,
+      "compressed_bytes": 33021,
+      "uncompressed_bytes": 408080
+    },
+    {
+      "table": "otel_metrics_point",
+      "rows": 400000,
+      "compressed_bytes": 670385,
+      "uncompressed_bytes": 12800441
+    }
+  ],
+  "parts_before_optimize": 9,
+  "total_compressed_bytes": 703406,
+  "total_uncompressed_bytes": 13208521,
+  "compressed_bytes_per_datapoint": 1.758515,
+  "query_latency_view_ms": {
+    "p50": 6.279,
+    "p95": 7.917,
+    "p99": 7.917,
+    "max": 13.635
+  },
+  "query_latency_two_step_ms": {
+    "p50": 3.569,
+    "p95": 4.002,
+    "p99": 4.002,
+    "max": 4.196
+  }
+}

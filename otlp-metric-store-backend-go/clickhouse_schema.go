@@ -6,10 +6,12 @@ package main
 //     addressed by Fingerprint. ReplacingMergeTree collapses duplicate inserts
 //     of the same Fingerprint to a single row during background merges. Because
 //     every duplicate row for a Fingerprint is byte-identical by construction,
-//     reads never need FINAL for correctness (the view uses it only to avoid
-//     fan-out in the JOIN). Ordered by (ServiceName, MetricName, Fingerprint) so
-//     that resolving the fingerprints for a given service/metric is an index
-//     range scan, not a full scan.
+//     reads never need FINAL for value correctness — any copy is interchangeable.
+//     A JOIN does need duplicates collapsed to avoid row fan-out; the view does
+//     that cheaply with `LIMIT 1 BY Fingerprint` instead of a merge-on-read
+//     FINAL. Ordered by (ServiceName, MetricName, Fingerprint) so that resolving
+//     the fingerprints for a given service/metric is an index range scan, not a
+//     full scan.
 //
 //   - otel_metrics_point — the high-volume datapoints. Partitioned by day so a
 //     time-bounded query prunes to the relevant parts, and ordered by
@@ -61,8 +63,10 @@ SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
 `
 
 // createMetricsViewSQL reconstructs the wide row by joining points to their
-// metadata. The metadata side uses FINAL so that an as-yet-unmerged duplicate
-// metadata row cannot fan a single datapoint out into multiple result rows.
+// metadata. The metadata side is deduplicated with `LIMIT 1 BY Fingerprint` so
+// an as-yet-unmerged duplicate metadata row cannot fan a single datapoint out
+// into multiple result rows. This is far cheaper than FINAL (no merge-on-read)
+// and safe because duplicate rows for a fingerprint are byte-identical.
 const createMetricsViewSQL = `
 CREATE VIEW IF NOT EXISTS otel_metrics AS
 SELECT
@@ -87,5 +91,5 @@ SELECT
     p.Value AS Value,
     p.Flags AS Flags
 FROM otel_metrics_point AS p
-INNER JOIN (SELECT * FROM otel_metrics_meta FINAL) AS m USING (Fingerprint);
+INNER JOIN (SELECT * FROM otel_metrics_meta LIMIT 1 BY Fingerprint) AS m USING (Fingerprint);
 `

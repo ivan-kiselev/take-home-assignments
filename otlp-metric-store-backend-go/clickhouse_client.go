@@ -148,6 +148,57 @@ func (s *ClickHouseMetricsStore) InsertPoints(ctx context.Context, rows []DataPo
 	return batch.Send()
 }
 
+// QueryRange is the two-step hot read path for a service/metric over a time
+// window: first resolve the matching fingerprints from the small lookup table
+// (an index range scan on the (ServiceName, MetricName, Fingerprint) sort key,
+// deduped with DISTINCT — no FINAL needed), then range-scan the datapoints for
+// those fingerprints. The points scan hits the (Fingerprint, TimeUnix) order key
+// and prunes partitions by date, so no full scan and no JOIN/FINAL are involved.
+func (s *ClickHouseMetricsStore) QueryRange(ctx context.Context, serviceName, metricName string, start, end time.Time) ([]DataPoint, error) {
+	fingerprintRows, err := s.conn.Query(ctx,
+		"SELECT DISTINCT Fingerprint FROM otel_metrics_meta WHERE ServiceName = $1 AND MetricName = $2",
+		serviceName, metricName)
+	if err != nil {
+		return nil, fmt.Errorf("resolving fingerprints: %w", err)
+	}
+	var fingerprints []uint64
+	for fingerprintRows.Next() {
+		var fingerprint uint64
+		if err := fingerprintRows.Scan(&fingerprint); err != nil {
+			_ = fingerprintRows.Close()
+			return nil, fmt.Errorf("scanning fingerprint: %w", err)
+		}
+		fingerprints = append(fingerprints, fingerprint)
+	}
+	_ = fingerprintRows.Close()
+	if err := fingerprintRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating fingerprints: %w", err)
+	}
+	if len(fingerprints) == 0 {
+		return nil, nil
+	}
+
+	pointRows, err := s.conn.Query(ctx, `
+		SELECT Fingerprint, StartTimeUnix, TimeUnix, Value, Flags
+		FROM otel_metrics_point
+		WHERE Fingerprint IN ($1) AND TimeUnix BETWEEN $2 AND $3`,
+		fingerprints, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("querying points: %w", err)
+	}
+	defer pointRows.Close()
+
+	var points []DataPoint
+	for pointRows.Next() {
+		var p DataPoint
+		if err := pointRows.Scan(&p.Fingerprint, &p.StartTimeUnix, &p.TimeUnix, &p.Value, &p.Flags); err != nil {
+			return nil, fmt.Errorf("scanning point: %w", err)
+		}
+		points = append(points, p)
+	}
+	return points, pointRows.Err()
+}
+
 // Close closes the underlying ClickHouse connection.
 func (s *ClickHouseMetricsStore) Close() error {
 	return s.conn.Close()

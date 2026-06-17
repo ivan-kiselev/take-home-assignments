@@ -20,6 +20,11 @@ import (
 var (
 	listenAddr            = flag.String("listenAddr", "localhost:4317", "The listen address")
 	maxReceiveMessageSize = flag.Int("maxReceiveMessageSize", 16777216, "The max message size in bytes the server can receive")
+
+	clickhouseAddr     = flag.String("clickhouseAddr", "", "ClickHouse address (host:port); empty disables storage (metrics are received but not persisted)")
+	clickhouseDatabase = flag.String("clickhouseDatabase", "default", "ClickHouse database")
+	clickhouseUser     = flag.String("clickhouseUser", "default", "ClickHouse username")
+	clickhousePassword = flag.String("clickhousePassword", "", "ClickHouse password")
 )
 
 const name = "dash0.com/otlp-log-processor-backend"
@@ -63,6 +68,26 @@ func run() (err error) {
 
 	flag.Parse()
 
+	// Wire ClickHouse storage when an address is configured. Without it the
+	// server still accepts metrics but does not persist them.
+	var ingester *Ingester
+	if *clickhouseAddr != "" {
+		store, storeErr := NewClickHouseMetricsStore(context.Background(), *clickhouseAddr, *clickhouseDatabase, *clickhouseUser, *clickhousePassword)
+		if storeErr != nil {
+			return storeErr
+		}
+		if storeErr := store.CreateTables(context.Background()); storeErr != nil {
+			return storeErr
+		}
+		ingester = NewIngester(store, IngesterConfig{})
+		// Drain the buffer before closing the connection (LIFO: ingester first).
+		defer func() { err = errors.Join(err, store.Close()) }()
+		defer func() { err = errors.Join(err, ingester.Close(context.Background())) }()
+		slog.Info("ClickHouse storage enabled", slog.String("addr", *clickhouseAddr))
+	} else {
+		slog.Warn("no -clickhouseAddr set; metrics will be received but not stored")
+	}
+
 	slog.Debug("Starting listener", slog.String("listenAddr", *listenAddr))
 	listener, err := net.Listen("tcp", *listenAddr)
 	if err != nil {
@@ -74,7 +99,7 @@ func run() (err error) {
 		grpc.MaxRecvMsgSize(*maxReceiveMessageSize),
 		grpc.Creds(insecure.NewCredentials()),
 	)
-	colmetricspb.RegisterMetricsServiceServer(grpcServer, newServer(*listenAddr, nil))
+	colmetricspb.RegisterMetricsServiceServer(grpcServer, newServer(*listenAddr, ingester))
 
 	slog.Debug("Starting gRPC server")
 

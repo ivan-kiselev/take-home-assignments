@@ -233,10 +233,13 @@ func TestGRPCToClickHouse(t *testing.T) {
 		t.Fatalf("creating tables: %v", err)
 	}
 
-	// Start gRPC server wired to the ClickHouse store.
+	// Start gRPC server wired to the ClickHouse store via the async ingester.
+	ingester := NewIngester(store, IngesterConfig{})
+	defer ingester.Close(context.Background())
+
 	lis := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
-	colmetricspb.RegisterMetricsServiceServer(grpcServer, newServer("bufconn", store))
+	colmetricspb.RegisterMetricsServiceServer(grpcServer, newServer("bufconn", ingester))
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Printf("error serving server: %v", err)
@@ -292,6 +295,11 @@ func TestGRPCToClickHouse(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("exporting metrics via grpc: %v", err)
+	}
+
+	// Flush the async buffer so the write is durable before we read it back.
+	if err := ingester.Flush(ctx); err != nil {
+		t.Fatalf("flushing ingester: %v", err)
 	}
 
 	// Verify the metric landed in ClickHouse via the reconstruction view.

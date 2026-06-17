@@ -71,7 +71,9 @@ Each metric is split across two tables instead of one wide row per datapoint:
   series collapse to a single row and resolving the fingerprints for a given
   service/metric is an index range scan. Because every duplicate row for a
   fingerprint is byte-identical by construction, reads never need `FINAL` for
-  correctness.
+  *value* correctness — any copy is interchangeable. (A `JOIN` against the table
+  still needs duplicates collapsed to avoid row fan-out; the view does that with
+  the cheap `LIMIT 1 BY Fingerprint` rather than a merge-on-read `FINAL`.)
 - **`otel_metrics_point`** — the high-volume datapoints: `Fingerprint`,
   timestamps, `Value`, `Flags`. It is partitioned by day (`toDate(TimeUnix)`) so
   time-bounded queries prune to the relevant parts, and ordered by
@@ -97,9 +99,11 @@ WHERE ServiceName = 'checkout'
   AND TimeUnix BETWEEN {from} AND {to};
 ```
 
-For the hottest read paths you can skip the join and go two-step: resolve the
+For the hottest read paths, skip the join and go two-step — resolve the
 fingerprints from the small `otel_metrics_meta` table, then range-scan
-`otel_metrics_point` by `Fingerprint` within the time window.
+`otel_metrics_point` by `Fingerprint` within the time window. This is exposed in
+code as `ClickHouseMetricsStore.QueryRange` and avoids the join entirely, so it
+scales with the (small) points slice rather than the cross product.
 
 Only Gauge and Sum (scalar) metrics are modelled; the points table is
 intentionally type-agnostic (value + timestamp). Histogram/summary families

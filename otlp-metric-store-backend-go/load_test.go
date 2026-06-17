@@ -98,10 +98,12 @@ type loadReport struct {
 	RequestsPerSecond           float64        `json:"requests_per_sec"`
 	RPCLatencyMs                latencyStats   `json:"rpc_latency_ms"`
 	Storage                     []tableStorage `json:"storage"`
+	PartsBeforeOptimize         uint64         `json:"parts_before_optimize"`
 	TotalCompressedBytes        uint64         `json:"total_compressed_bytes"`
 	TotalUncompressedBytes      uint64         `json:"total_uncompressed_bytes"`
 	CompressedBytesPerDatapoint float64        `json:"compressed_bytes_per_datapoint"`
-	QueryLatencyMs              latencyStats   `json:"query_latency_ms"`
+	QueryLatencyViewMs          latencyStats   `json:"query_latency_view_ms"`
+	QueryLatencyTwoStepMs       latencyStats   `json:"query_latency_two_step_ms"`
 }
 
 type latencyStats struct {
@@ -316,11 +318,29 @@ func measureStorage(t *testing.T, store *ClickHouseMetricsStore, tables []string
 	return storageByTable
 }
 
-// measureQueryLatency runs a representative time-bounded + filtered query a few
-// times and reports the latency distribution. It reads through the
-// reconstruction view (points joined to deduped metadata), the documented read
-// path for the split schema.
-func measureQueryLatency(t *testing.T, store *ClickHouseMetricsStore, config loadConfig) latencyStats {
+// countActiveParts sums the active parts across the given tables. Read BEFORE
+// OPTIMIZE FINAL, it shows how many parts ingestion created — the direct measure
+// of the small-part problem that batching is meant to fix.
+func countActiveParts(t *testing.T, store *ClickHouseMetricsStore, tables []string) uint64 {
+	t.Helper()
+	ctx := context.Background()
+	var total uint64
+	for _, table := range tables {
+		var parts uint64
+		err := store.conn.QueryRow(ctx,
+			"SELECT count() FROM system.parts WHERE active AND database = 'default' AND table = $1", table,
+		).Scan(&parts)
+		if err != nil {
+			t.Fatalf("counting parts for %s: %v", table, err)
+		}
+		total += parts
+	}
+	return total
+}
+
+// measureQueryLatencyView times the representative time-bounded query through the
+// reconstruction view (points joined to deduped metadata) — the convenience read.
+func measureQueryLatencyView(t *testing.T, store *ClickHouseMetricsStore, config loadConfig) latencyStats {
 	t.Helper()
 	ctx := context.Background()
 	rangeStart := loadBaseTime
@@ -342,7 +362,29 @@ func measureQueryLatency(t *testing.T, store *ClickHouseMetricsStore, config loa
 		).Scan(&matchedRows, &averageValue)
 		latencies = append(latencies, time.Since(queryStartedAt))
 		if err != nil {
-			t.Fatalf("query latency probe: %v", err)
+			t.Fatalf("view query probe: %v", err)
+		}
+	}
+	return percentilesMs(latencies)
+}
+
+// measureQueryLatencyTwoStep times the hot read path: resolve fingerprints from
+// the lookup table, then range-scan the points (ClickHouseMetricsStore.QueryRange).
+func measureQueryLatencyTwoStep(t *testing.T, store *ClickHouseMetricsStore, config loadConfig) latencyStats {
+	t.Helper()
+	ctx := context.Background()
+	rangeStart := loadBaseTime
+	rangeEnd := loadBaseTime.Add(time.Duration(config.DatapointsPerSeries) * 10 * time.Second)
+
+	const iterations = 20
+	latencies := make([]time.Duration, 0, iterations)
+	for iteration := 0; iteration < iterations; iteration++ {
+		serviceName := fmt.Sprintf("svc-%d", iteration%config.Services)
+		queryStartedAt := time.Now()
+		_, err := store.QueryRange(ctx, serviceName, "metric.0", rangeStart, rangeEnd)
+		latencies = append(latencies, time.Since(queryStartedAt))
+		if err != nil {
+			t.Fatalf("two-step query probe: %v", err)
 		}
 	}
 	return percentilesMs(latencies)
@@ -378,20 +420,23 @@ func renderMarkdown(report loadReport) string {
 		report.TotalSeries, report.Config.DatapointsPerSeries, report.TotalDatapoints, report.TotalRequests, report.Config.Workers)
 	markdown += "\n## Ingest\n\n"
 	markdown += fmt.Sprintf("- Duration: %.2fs\n", report.IngestSeconds)
-	markdown += fmt.Sprintf("- Throughput: **%.0f datapoints/sec** (%.0f req/sec)\n", report.DatapointsPerSecond, report.RequestsPerSecond)
+	markdown += fmt.Sprintf("- Throughput (incl. drain): **%.0f datapoints/sec** (%.0f req/sec)\n", report.DatapointsPerSecond, report.RequestsPerSecond)
 	markdown += fmt.Sprintf("- Export RPC latency (ms): p50=%.2f p95=%.2f p99=%.2f max=%.2f\n",
 		report.RPCLatencyMs.P50, report.RPCLatencyMs.P95, report.RPCLatencyMs.P99, report.RPCLatencyMs.Max)
-	markdown += "\n## Storage (after OPTIMIZE FINAL)\n\n"
+	markdown += "\n## Storage\n\n"
+	markdown += fmt.Sprintf("- Active parts before OPTIMIZE: **%d**\n\n", report.PartsBeforeOptimize)
 	markdown += "| Table | Rows | Compressed | Uncompressed |\n|---|---:|---:|---:|\n"
 	for _, storage := range report.Storage {
 		markdown += fmt.Sprintf("| %s | %d | %s | %s |\n", storage.Table, storage.Rows, humanBytes(storage.CompressedBytes), humanBytes(storage.UncompressedBytes))
 	}
-	markdown += fmt.Sprintf("\n- **Total compressed:** %s\n", humanBytes(report.TotalCompressedBytes))
+	markdown += fmt.Sprintf("\n- **Total compressed (after OPTIMIZE FINAL):** %s\n", humanBytes(report.TotalCompressedBytes))
 	markdown += fmt.Sprintf("- **Total uncompressed:** %s\n", humanBytes(report.TotalUncompressedBytes))
 	markdown += fmt.Sprintf("- **Compressed bytes / datapoint:** **%.2f**\n", report.CompressedBytesPerDatapoint)
-	markdown += "\n## Query (time-bounded + filtered, otel_metrics_gauge)\n\n"
-	markdown += fmt.Sprintf("- Latency (ms): p50=%.2f p95=%.2f p99=%.2f max=%.2f\n",
-		report.QueryLatencyMs.P50, report.QueryLatencyMs.P95, report.QueryLatencyMs.P99, report.QueryLatencyMs.Max)
+	markdown += "\n## Query (time-bounded + filtered by service/metric)\n\n"
+	markdown += fmt.Sprintf("- Convenience view (ms): p50=%.2f p95=%.2f p99=%.2f max=%.2f\n",
+		report.QueryLatencyViewMs.P50, report.QueryLatencyViewMs.P95, report.QueryLatencyViewMs.P99, report.QueryLatencyViewMs.Max)
+	markdown += fmt.Sprintf("- Two-step hot path (ms): p50=%.2f p95=%.2f p99=%.2f max=%.2f\n",
+		report.QueryLatencyTwoStepMs.P50, report.QueryLatencyTwoStepMs.P95, report.QueryLatencyTwoStepMs.P99, report.QueryLatencyTwoStepMs.Max)
 	return markdown
 }
 
@@ -419,7 +464,7 @@ func TestLoadBaseline(t *testing.T) {
 	}
 	schemaDescription := os.Getenv("LOAD_SCHEMA")
 	if schemaDescription == "" {
-		schemaDescription = "wide-row (metadata duplicated per datapoint)"
+		schemaDescription = "split + async batched writer"
 	}
 
 	store, cleanup := setupClickHouse(t)
@@ -430,10 +475,12 @@ func TestLoadBaseline(t *testing.T) {
 		t.Fatalf("creating tables: %v", err)
 	}
 
-	// Wire the real gRPC Export path over an in-memory listener.
+	// Wire the real gRPC Export path over an in-memory listener, through the
+	// async batching ingester.
+	ingester := NewIngester(store, IngesterConfig{})
 	listener := bufconn.Listen(16 * 1024 * 1024)
 	grpcServer := grpc.NewServer(grpc.MaxRecvMsgSize(64 * 1024 * 1024))
-	colmetricspb.RegisterMetricsServiceServer(grpcServer, newServer("bufconn", store))
+	colmetricspb.RegisterMetricsServiceServer(grpcServer, newServer("bufconn", ingester))
 	go func() { _ = grpcServer.Serve(listener) }()
 	defer grpcServer.Stop()
 
@@ -451,21 +498,34 @@ func TestLoadBaseline(t *testing.T) {
 	t.Logf("starting load: %d series, %d datapoints, %d requests, %d workers",
 		config.totalSeries(), config.totalDatapoints(), len(buildJobs(config)), config.Workers)
 
+	// Time the full ingest end-to-end: sending all requests AND draining the
+	// async buffer. With ack-on-enqueue, ignoring drain would overstate throughput.
+	ingestStartedAt := time.Now()
 	report := runLoad(t, config, client)
+	if err := ingester.Close(ctx); err != nil {
+		t.Fatalf("draining ingester: %v", err)
+	}
+	ingestElapsed := time.Since(ingestStartedAt)
 	report.Label = label
 	report.Schema = schemaDescription
+	report.IngestSeconds = ingestElapsed.Seconds()
+	report.DatapointsPerSecond = float64(report.TotalDatapoints) / ingestElapsed.Seconds()
+	report.RequestsPerSecond = float64(report.TotalRequests) / ingestElapsed.Seconds()
 
 	tables := []string{"otel_metrics_meta", "otel_metrics_point"}
+	report.PartsBeforeOptimize = countActiveParts(t, store, tables)
 	report.Storage = measureStorage(t, store, tables)
 	for _, storage := range report.Storage {
 		report.TotalCompressedBytes += storage.CompressedBytes
 		report.TotalUncompressedBytes += storage.UncompressedBytes
 	}
 	report.CompressedBytesPerDatapoint = float64(report.TotalCompressedBytes) / float64(report.TotalDatapoints)
-	report.QueryLatencyMs = measureQueryLatency(t, store, config)
+	report.QueryLatencyViewMs = measureQueryLatencyView(t, store, config)
+	report.QueryLatencyTwoStepMs = measureQueryLatencyTwoStep(t, store, config)
 
 	writeArtifact(t, report)
 
-	t.Logf("ingest: %.0f dp/s, %.2f bytes/dp, query p99 %.2fms",
-		report.DatapointsPerSecond, report.CompressedBytesPerDatapoint, report.QueryLatencyMs.P99)
+	t.Logf("ingest: %.0f dp/s, %.2f bytes/dp, %d parts pre-optimize, view p99 %.2fms, two-step p99 %.2fms",
+		report.DatapointsPerSecond, report.CompressedBytesPerDatapoint, report.PartsBeforeOptimize,
+		report.QueryLatencyViewMs.P99, report.QueryLatencyTwoStepMs.P99)
 }
