@@ -2,18 +2,18 @@ package main
 
 // The schema splits each metric into two tables:
 //
-//   - otel_metrics_meta — the lookup table. One row per distinct series,
+//   - otel_metrics_meta - the lookup table. One row per distinct series,
 //     addressed by Fingerprint. ReplacingMergeTree collapses duplicate inserts
 //     of the same Fingerprint to a single row during background merges. Because
 //     every duplicate row for a Fingerprint is byte-identical by construction,
-//     reads never need FINAL for value correctness — any copy is interchangeable.
+//     reads never need FINAL for value correctness - any copy is interchangeable.
 //     A JOIN does need duplicates collapsed to avoid row fan-out; the view does
 //     that cheaply with `LIMIT 1 BY Fingerprint` instead of a merge-on-read
 //     FINAL. Ordered by (ServiceName, MetricName, Fingerprint) so that resolving
 //     the fingerprints for a given service/metric is an index range scan, not a
 //     full scan.
 //
-//   - otel_metrics_point — the high-volume datapoints. Partitioned by day so a
+//   - otel_metrics_point - the high-volume datapoints. Partitioned by day so a
 //     time-bounded query prunes to the relevant parts, and ordered by
 //     (Fingerprint, TimeUnix) so each series is a contiguous, time-sorted run.
 //

@@ -151,7 +151,7 @@ func (s *ClickHouseMetricsStore) InsertPoints(ctx context.Context, rows []DataPo
 // QueryRange is the two-step hot read path for a service/metric over a time
 // window: first resolve the matching fingerprints from the small lookup table
 // (an index range scan on the (ServiceName, MetricName, Fingerprint) sort key,
-// deduped with DISTINCT — no FINAL needed), then range-scan the datapoints for
+// deduped with DISTINCT - no FINAL needed), then range-scan the datapoints for
 // those fingerprints. The points scan hits the (Fingerprint, TimeUnix) order key
 // and prunes partitions by date, so no full scan and no JOIN/FINAL are involved.
 func (s *ClickHouseMetricsStore) QueryRange(ctx context.Context, serviceName, metricName string, start, end time.Time) ([]DataPoint, error) {

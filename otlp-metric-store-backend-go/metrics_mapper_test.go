@@ -11,7 +11,7 @@ import (
 	"hegel.dev/go/hegel"
 )
 
-// These property-based tests pin down the correctness invariants of MapMetrics —
+// These property-based tests pin down the correctness invariants of MapMetrics -
 // the function that turns an OTLP request into exactly what we store: deduped
 // per-series metadata plus the datapoints that reference it by fingerprint.
 // They assert on that storage-shaped output directly, not on any intermediate
@@ -183,7 +183,7 @@ func drawMetrics(ht *hegel.T) generatedMetrics {
 	return result
 }
 
-// Property: every datapoint becomes exactly one stored point — none dropped,
+// Property: every datapoint becomes exactly one stored point - none dropped,
 // none duplicated.
 func TestMapMetrics_ExactlyOnePointPerDatapoint(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
@@ -223,7 +223,7 @@ func TestMapMetrics_PointMatchesSourceDatapoint(t *testing.T) {
 	})
 }
 
-// Property: the fingerprint is a faithful series identity — two datapoints get
+// Property: the fingerprint is a faithful series identity - two datapoints get
 // the same fingerprint if and only if they belong to the same series. This is
 // the core guarantee the lookup-table design rests on: same series collapses to
 // one key, different series never collide.
@@ -258,7 +258,7 @@ func TestMapMetrics_FingerprintMatchesSeriesIdentity(t *testing.T) {
 }
 
 // Property: metadata is deduplicated to exactly one record per distinct series
-// (fingerprint) seen in the batch — no duplicates in the returned slice, and one
+// (fingerprint) seen in the batch - no duplicates in the returned slice, and one
 // record per distinct point fingerprint.
 func TestMapMetrics_MetadataDedupedPerSeries(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
@@ -331,7 +331,7 @@ func TestMapMetrics_MetadataContentMatchesSeries(t *testing.T) {
 	})
 }
 
-// Property: mapping is deterministic — the same request maps to identical
+// Property: mapping is deterministic - the same request maps to identical
 // fingerprints on every call. Fingerprints must be stable across calls,
 // batches, restarts, and instances for the lookup table to work.
 func TestMapMetrics_FingerprintDeterministic(t *testing.T) {

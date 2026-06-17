@@ -3,11 +3,11 @@
 Same harness, same workload (2,000 series × 200 datapoints = **400,000 datapoints**,
 4,000 RPCs, 8 workers), against a throwaway ClickHouse via testcontainers.
 
-- **baseline** — wide row: every datapoint stores a full copy of its metadata.
-- **split** — one metadata row per series (`otel_metrics_meta`, ReplacingMergeTree)
+- **baseline** - wide row: every datapoint stores a full copy of its metadata.
+- **split** - one metadata row per series (`otel_metrics_meta`, ReplacingMergeTree)
   + thin datapoints (`otel_metrics_point`), referencing it by fingerprint.
   Synchronous per-request inserts; view read path uses `FINAL`.
-- **split + async** — same schema, plus the async batching `Ingester` (Export
+- **split + async** - same schema, plus the async batching `Ingester` (Export
   acks on enqueue; one flusher writes large batches with cross-request metadata
   dedup); view uses `LIMIT 1 BY` instead of `FINAL`; two-step `QueryRange` hot path.
 
@@ -17,8 +17,8 @@ Same harness, same workload (2,000 series × 200 datapoints = **400,000 datapoin
 |---|---:|---:|---:|---|
 | Ingest throughput | 4,385 dp/s | 2,399 dp/s | **269,677 dp/s** | **61× faster** |
 | Export RPC p50 | 214 ms | 343 ms | **0.31 ms** | ack-on-enqueue |
-| Query p99 — hot path (two-step) | 4.5 ms | — | **4.0 ms** | **beats baseline** |
-| Query p99 — convenience view | 4.5 ms | 19.6 ms | 7.9 ms | ~1.8× slower (join) |
+| Query p99 - hot path (two-step) | 4.5 ms | - | **4.0 ms** | **beats baseline** |
+| Query p99 - convenience view | 4.5 ms | 19.6 ms | 7.9 ms | ~1.8× slower (join) |
 | Compressed bytes / datapoint | 5.08 | 1.76 | 1.76 | **2.9× smaller** |
 | Compressed on disk | 1.94 MiB | 0.67 MiB | 0.67 MiB | **2.9× smaller** |
 | Uncompressed | 82.5 MiB | 12.6 MiB | 12.6 MiB | **6.5× smaller** |
@@ -29,18 +29,18 @@ storage win is fully retained.
 
 ## Why ingest went from 2,399 → 269,677 dp/s
 
-The bottleneck was never the schema — it was the **number of small INSERTs**, each
+The bottleneck was never the schema - it was the **number of small INSERTs**, each
 creating a ClickHouse part. Baseline did 4,000 inserts; the sync split did ~8,000
 (metadata + points per request). The async writer batches across requests:
 
-- **9 parts** written for the whole run (vs thousands) — buffered points flush in
+- **9 parts** written for the whole run (vs thousands) - buffered points flush in
   ~50k-row batches, so ClickHouse builds a handful of large parts instead of
   thousands of tiny ones. This is the dominant win.
 - **Cross-request metadata dedup**: the 2,000 distinct series are inserted ~once
   total instead of being re-sent on all 4,000 requests.
 - **Export latency collapses** to enqueue cost (p50 0.31 ms) because the RPC no
   longer waits on ClickHouse. (p99 109 ms reflects backpressure when the bounded
-  queue is full — the intended flow-control signal, not per-request DB latency.)
+  queue is full - the intended flow-control signal, not per-request DB latency.)
 
 The trade-off, by design: Export acks before the data is durably written, so
 buffered-but-unflushed data is lost on a crash. Bounded by queue + batch size and
@@ -58,7 +58,7 @@ Two fixes:
   dedup for the join cheaply → 7.9 ms p99 (down from 19.6). Still does a join, so
   slightly above baseline; the two-step path is the one to use when latency matters.
 
-## Storage (unchanged from the split — async doesn't affect on-disk layout)
+## Storage (unchanged from the split - async doesn't affect on-disk layout)
 
 | Table | Rows | Compressed | Uncompressed |
 |---|---:|---:|---:|

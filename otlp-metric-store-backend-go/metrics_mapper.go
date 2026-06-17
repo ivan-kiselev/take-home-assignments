@@ -85,7 +85,7 @@ func numberDataPointValue(dp *metricspb.NumberDataPoint) float64 {
 //   - the scalar datapoints, each referencing its series by Fingerprint.
 //
 // A series' identity is the full set of fields that stay constant across its
-// datapoints — resource, scope, metric, datapoint attributes, and type — folded
+// datapoints - resource, scope, metric, datapoint attributes, and type - folded
 // into the Fingerprint. Metadata is deduplicated within the batch here; cross-
 // batch and cross-instance duplicates are collapsed by ClickHouse's
 // ReplacingMergeTree on the same Fingerprint. Only Gauge and Sum metrics are

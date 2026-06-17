@@ -64,27 +64,30 @@ make loadtest               # load test against a throwaway ClickHouse, writes b
 
 Each metric is split across two tables instead of one wide row per datapoint:
 
-- **`otel_metrics_meta`** — the lookup table. One row per distinct *series*
+- **`otel_metrics_meta`** - the lookup table. One row per distinct *series*
   (resource + scope + metric + datapoint attributes + type), addressed by a
   deterministic 64-bit `Fingerprint`. It is a `ReplacingMergeTree` ordered by
   `(ServiceName, MetricName, Fingerprint)`, so repeated inserts of the same
   series collapse to a single row and resolving the fingerprints for a given
   service/metric is an index range scan. Because every duplicate row for a
   fingerprint is byte-identical by construction, reads never need `FINAL` for
-  *value* correctness — any copy is interchangeable. (A `JOIN` against the table
+  *value* correctness - any copy is interchangeable. (A `JOIN` against the table
   still needs duplicates collapsed to avoid row fan-out; the view does that with
   the cheap `LIMIT 1 BY Fingerprint` rather than a merge-on-read `FINAL`.)
-- **`otel_metrics_point`** — the high-volume datapoints: `Fingerprint`,
+- **`otel_metrics_point`** - the high-volume datapoints: `Fingerprint`,
   timestamps, `Value`, `Flags`. It is partitioned by day (`toDate(TimeUnix)`) so
   time-bounded queries prune to the relevant parts, and ordered by
-  `(Fingerprint, TimeUnix)` so each series is a contiguous, time-sorted run —
+  `(Fingerprint, TimeUnix)` so each series is a contiguous, time-sorted run -
   no full scans for a `[from, to]` query.
 
-The `Fingerprint` is an order-independent hash over every field that identifies
-a series, so the same series always hashes to the same key across datapoints,
-batches, and instances; any change to the identifying attributes yields a new
-series (and a new metadata row), which is how attribute drift over time is
-handled.
+The `Fingerprint` is a deterministic hash over every field that identifies a
+series. Attribute maps are canonicalized - keys sorted, each entry
+length-prefixed - so a series hashes to the same key regardless of the order
+attributes arrive in, and identically across datapoints, batches, and instances.
+(The field order within the hash is fixed and length-prefixed on purpose, so
+distinct field layouts can't collide.) Any change to an identifying field yields
+a new fingerprint - hence a new series and metadata row - which is how attribute
+drift over time is handled.
 
 ### Querying
 
@@ -99,15 +102,43 @@ WHERE ServiceName = 'checkout'
   AND TimeUnix BETWEEN {from} AND {to};
 ```
 
-For the hottest read paths, skip the join and go two-step — resolve the
+For the hottest read paths, skip the join and go two-step - resolve the
 fingerprints from the small `otel_metrics_meta` table, then range-scan
 `otel_metrics_point` by `Fingerprint` within the time window. This is exposed in
 code as `ClickHouseMetricsStore.QueryRange` and avoids the join entirely, so it
-scales with the (small) points slice rather than the cross product.
+scales with the (small) points slice rather than the cross product of a `JOIN`, as `JOIN` 
+would suffer from amplification of duplicates of `ReplacingMergeTree` engine.
 
 Only Gauge and Sum (scalar) metrics are modelled; the points table is
 intentionally type-agnostic (value + timestamp). Histogram/summary families
 would get their own points tables following the same split.
+
+
+## Process of development
+
+The whole solution is vibe-coded, but be assured, is not one-shot, it took many iterations to squeeze plausable results. 
+
+Development was split into three major stages with appropriate commits:
+- Base benchmark
+  - Here baseline performance is measured, so that I can measure the same benchmark after all the changes are thru and copare the throughput
+  - Lives in [load_test.go](./load_test.go), run with `LOAD_LABEL=my_bench make loadtest`
+  - Artifacts can be found in [baseline.md](./bench/baseline.md)
+- General property tests + introduction of table split
+  - Property test library of choice is Hegel, as it seems to be winning the world of proptest lately
+  - Proptests are introduces as guardians for correctness in the face of incoming changes
+  - Table split into the storage model describe above
+  - Load-tests after the split [comparison_after_split.md](./bench/comparison_after_split.md)
+  - The results of benching were not satisfying neither for reads nor for writes, and therefore some optimisation was needed
+- Performance optimisation
+  - In-memory buffering and flushing periodically (200ms)/on-shutdown/on-size-trashold
+  - Read-path is composed of two sequential queries: 
+    - fetch the fingerprint
+    - fetch the datapoints for the fingerprint
+    - uses the fact that fingerprint metadata entries are identical by construction at tolerates duplicates with `LIMIT 1 BY fingerprint` instead of forcing tree merge on read with `FINAL`, which brings read path to acceptable level of performance
+  - Benchmark: [comparison_after_async.md](./bench/comparison_after_async.md)
+
+***Durability tradeoff***: we lose at most 200ms worth of data on crash, but not otherwise.
+***LLM Participation in the project***: I don't have meaningful experience with ClickHouse, and last few years I spent doing almost exclusively Rust, so this project code is produced entirely by an LLM, but be not mistaken, it's no a one-shot. Iterations and reviews, and catching hallucinations were plenty and it took fair amount of hours to get it to the state in which I submit it (therefore proptest-first and bench-first approach to compensate for my own shortcomings of expertise required for this assignment).
 
 ## References
 

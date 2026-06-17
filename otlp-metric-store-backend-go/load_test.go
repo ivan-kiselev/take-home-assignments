@@ -319,7 +319,7 @@ func measureStorage(t *testing.T, store *ClickHouseMetricsStore, tables []string
 }
 
 // countActiveParts sums the active parts across the given tables. Read BEFORE
-// OPTIMIZE FINAL, it shows how many parts ingestion created — the direct measure
+// OPTIMIZE FINAL, it shows how many parts ingestion created - the direct measure
 // of the small-part problem that batching is meant to fix.
 func countActiveParts(t *testing.T, store *ClickHouseMetricsStore, tables []string) uint64 {
 	t.Helper()
@@ -339,7 +339,7 @@ func countActiveParts(t *testing.T, store *ClickHouseMetricsStore, tables []stri
 }
 
 // measureQueryLatencyView times the representative time-bounded query through the
-// reconstruction view (points joined to deduped metadata) — the convenience read.
+// reconstruction view (points joined to deduped metadata) - the convenience read.
 func measureQueryLatencyView(t *testing.T, store *ClickHouseMetricsStore, config loadConfig) latencyStats {
 	t.Helper()
 	ctx := context.Background()

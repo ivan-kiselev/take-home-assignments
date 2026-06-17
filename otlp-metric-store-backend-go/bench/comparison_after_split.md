@@ -3,8 +3,8 @@
 Same harness, same workload (2,000 series × 200 datapoints = **400,000 datapoints**,
 4,000 RPCs, 8 workers), against a throwaway ClickHouse via testcontainers.
 
-- **baseline** — wide row: every datapoint stores a full copy of its metadata.
-- **after** — split: one metadata row per series (`otel_metrics_meta`,
+- **baseline** - wide row: every datapoint stores a full copy of its metadata.
+- **after** - split: one metadata row per series (`otel_metrics_meta`,
   ReplacingMergeTree) + thin datapoints (`otel_metrics_point`) referencing it by
   fingerprint.
 
@@ -28,13 +28,13 @@ Same harness, same workload (2,000 series × 200 datapoints = **400,000 datapoin
 | after: `otel_metrics_point` | 400,000 | 655 KiB | 12.2 MiB |
 
 The metadata that was previously repeated on all 400k rows is now stored **2,000
-times (once per series) — a 200× reduction in metadata copies**. The win is
+times (once per series) - a 200× reduction in metadata copies**. The win is
 largest in *uncompressed* size (6.5×), which is what drives memory, merge work,
 and page-cache pressure; on compressed disk it is still a solid 2.9×, smaller
 only because ClickHouse's `LowCardinality + ZSTD` was already compressing the
 duplicated columns well (flagged in the Part 1 baseline).
 
-## The two regressions — both expected, both addressable
+## The two regressions - both expected, both addressable
 
 These are **not** caused by the schema; they come from how writes and reads are
 currently wired, and were called out as risks in Part 1.
@@ -50,5 +50,5 @@ The change delivers the storage goal decisively (2.9× compressed, 6.5×
 uncompressed, 200× fewer metadata copies) and is proven lossless by the
 DB-backed reconstruction property test. The throughput and query-latency
 regressions are artifacts of synchronous per-request writes and the FINAL-join
-read path, respectively — both have clear, already-identified remediations
+read path, respectively - both have clear, already-identified remediations
 (async batched writes; two-step reads) that are the natural next iteration.

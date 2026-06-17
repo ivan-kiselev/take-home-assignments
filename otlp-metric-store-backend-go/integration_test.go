@@ -415,7 +415,7 @@ func TestReconstructionEquivalence(t *testing.T) {
 
 // TestMetadataDedup is a DB-backed property test: inserting the same series
 // metadata any number of times collapses, after merges, to exactly one row per
-// fingerprint. This is the storage win — repeated metadata does not accumulate.
+// fingerprint.
 func TestMetadataDedup(t *testing.T) {
 	store, cleanup := setupClickHouse(t)
 	defer cleanup()
