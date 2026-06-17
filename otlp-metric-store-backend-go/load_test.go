@@ -317,7 +317,9 @@ func measureStorage(t *testing.T, store *ClickHouseMetricsStore, tables []string
 }
 
 // measureQueryLatency runs a representative time-bounded + filtered query a few
-// times and reports the latency distribution. Mirrors the "step 2" read path.
+// times and reports the latency distribution. It reads through the
+// reconstruction view (points joined to deduped metadata), the documented read
+// path for the split schema.
 func measureQueryLatency(t *testing.T, store *ClickHouseMetricsStore, config loadConfig) latencyStats {
 	t.Helper()
 	ctx := context.Background()
@@ -333,7 +335,7 @@ func measureQueryLatency(t *testing.T, store *ClickHouseMetricsStore, config loa
 		queryStartedAt := time.Now()
 		err := store.conn.QueryRow(ctx, `
 			SELECT count(), avg(Value)
-			FROM otel_metrics_gauge
+			FROM otel_metrics
 			WHERE ServiceName = $1
 			  AND MetricName = 'metric.0'
 			  AND TimeUnix BETWEEN $2 AND $3`, serviceName, rangeStart, rangeEnd,
@@ -453,7 +455,7 @@ func TestLoadBaseline(t *testing.T) {
 	report.Label = label
 	report.Schema = schemaDescription
 
-	tables := []string{"otel_metrics_gauge", "otel_metrics_sum"}
+	tables := []string{"otel_metrics_meta", "otel_metrics_point"}
 	report.Storage = measureStorage(t, store, tables)
 	for _, storage := range report.Storage {
 		report.TotalCompressedBytes += storage.CompressedBytes

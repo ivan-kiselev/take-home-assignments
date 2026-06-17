@@ -54,8 +54,56 @@ go run ./...
 
 Run tests
 ```shell
-go test ./...
+go test ./...                # fast unit + property tests (no Docker)
+make test-property          # just the Hegel property-based tests for the mapper
+make test-integration       # integration + DB-backed property tests (needs Docker)
+make loadtest               # load test against a throwaway ClickHouse, writes bench/
 ```
+
+## Storage model
+
+Each metric is split across two tables instead of one wide row per datapoint:
+
+- **`otel_metrics_meta`** — the lookup table. One row per distinct *series*
+  (resource + scope + metric + datapoint attributes + type), addressed by a
+  deterministic 64-bit `Fingerprint`. It is a `ReplacingMergeTree` ordered by
+  `(ServiceName, MetricName, Fingerprint)`, so repeated inserts of the same
+  series collapse to a single row and resolving the fingerprints for a given
+  service/metric is an index range scan. Because every duplicate row for a
+  fingerprint is byte-identical by construction, reads never need `FINAL` for
+  correctness.
+- **`otel_metrics_point`** — the high-volume datapoints: `Fingerprint`,
+  timestamps, `Value`, `Flags`. It is partitioned by day (`toDate(TimeUnix)`) so
+  time-bounded queries prune to the relevant parts, and ordered by
+  `(Fingerprint, TimeUnix)` so each series is a contiguous, time-sorted run —
+  no full scans for a `[from, to]` query.
+
+The `Fingerprint` is an order-independent hash over every field that identifies
+a series, so the same series always hashes to the same key across datapoints,
+batches, and instances; any change to the identifying attributes yields a new
+series (and a new metadata row), which is how attribute drift over time is
+handled.
+
+### Querying
+
+A convenience view, **`otel_metrics`**, reconstructs the wide row by joining
+points to their (deduplicated) metadata:
+
+```sql
+SELECT ServiceName, MetricName, TimeUnix, Value
+FROM otel_metrics
+WHERE ServiceName = 'checkout'
+  AND MetricName  = 'http.server.duration'
+  AND TimeUnix BETWEEN {from} AND {to};
+```
+
+For the hottest read paths you can skip the join and go two-step: resolve the
+fingerprints from the small `otel_metrics_meta` table, then range-scan
+`otel_metrics_point` by `Fingerprint` within the time window.
+
+Only Gauge and Sum (scalar) metrics are modelled; the points table is
+intentionally type-agnostic (value + timestamp). Histogram/summary families
+would get their own points tables following the same split.
 
 ## References
 

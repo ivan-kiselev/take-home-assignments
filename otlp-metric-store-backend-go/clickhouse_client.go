@@ -9,38 +9,44 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
-// GaugeRow represents a single gauge data point for ClickHouse insertion.
-type GaugeRow struct {
-	ResourceAttributes    map[string]string
-	ResourceSchemaUrl     string
-	ScopeName             string
-	ScopeVersion          string
-	ScopeAttributes       map[string]string
-	ScopeDroppedAttrCount uint32
-	ScopeSchemaUrl        string
-	ServiceName           string
-	MetricName            string
-	MetricDescription     string
-	MetricUnit            string
-	Attributes            map[string]string
-	StartTimeUnix         time.Time
-	TimeUnix              time.Time
-	Value                 float64
-	Flags                 uint32
+// SeriesMetadata is one row of the lookup table: the identity and descriptive
+// metadata of a single metric series, addressed by its Fingerprint. All
+// datapoints of the series reference this row by Fingerprint instead of
+// repeating the metadata.
+type SeriesMetadata struct {
+	Fingerprint            uint64
+	MetricType             string
+	ResourceAttributes     map[string]string
+	ResourceSchemaUrl      string
+	ScopeName              string
+	ScopeVersion           string
+	ScopeAttributes        map[string]string
+	ScopeDroppedAttrCount  uint32
+	ScopeSchemaUrl         string
+	ServiceName            string
+	MetricName             string
+	MetricDescription      string
+	MetricUnit             string
+	Attributes             map[string]string
+	AggregationTemporality int32 // sum only; zero for gauges
+	IsMonotonic            bool  // sum only; false for gauges
 }
 
-// SumRow represents a single sum data point for ClickHouse insertion.
-type SumRow struct {
-	GaugeRow
-	AggregationTemporality int32
-	IsMonotonic            bool
+// DataPoint is one row of the points table: a scalar observation that references
+// its series by Fingerprint. This is the high-volume table.
+type DataPoint struct {
+	Fingerprint   uint64
+	StartTimeUnix time.Time
+	TimeUnix      time.Time
+	Value         float64
+	Flags         uint32
 }
 
 // MetricsStore defines the interface for storing metrics in ClickHouse.
 type MetricsStore interface {
 	CreateTables(ctx context.Context) error
-	InsertGauge(ctx context.Context, rows []GaugeRow) error
-	InsertSum(ctx context.Context, rows []SumRow) error
+	InsertMetadata(ctx context.Context, rows []SeriesMetadata) error
+	InsertPoints(ctx context.Context, rows []DataPoint) error
 	Close() error
 }
 
@@ -73,31 +79,34 @@ func NewClickHouseMetricsStore(ctx context.Context, addr string, database string
 	return &ClickHouseMetricsStore{conn: conn}, nil
 }
 
-// CreateTables executes DDL for all 5 metric tables.
+// CreateTables executes DDL for the metadata lookup table, the points table, and
+// the reconstruction view.
 func (s *ClickHouseMetricsStore) CreateTables(ctx context.Context) error {
 	ddls := []string{
-		createGaugeTableSQL,
-		createSumTableSQL,
-		createHistogramTableSQL,
-		createExponentialHistogramTableSQL,
-		createSummaryTableSQL,
+		createMetaTableSQL,
+		createPointTableSQL,
+		createMetricsViewSQL,
 	}
 	for _, ddl := range ddls {
 		if err := s.conn.Exec(ctx, ddl); err != nil {
-			return fmt.Errorf("creating table: %w", err)
+			return fmt.Errorf("creating schema object: %w", err)
 		}
 	}
 	return nil
 }
 
-// InsertGauge batch-inserts gauge rows into otel_metrics_gauge.
-func (s *ClickHouseMetricsStore) InsertGauge(ctx context.Context, rows []GaugeRow) error {
-	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO otel_metrics_gauge")
+// InsertMetadata batch-inserts series-metadata rows into otel_metrics_meta.
+// Rows are expected to be deduplicated by the caller; ReplacingMergeTree
+// collapses any remaining duplicates by Fingerprint during background merges.
+func (s *ClickHouseMetricsStore) InsertMetadata(ctx context.Context, rows []SeriesMetadata) error {
+	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO otel_metrics_meta")
 	if err != nil {
-		return fmt.Errorf("preparing gauge batch: %w", err)
+		return fmt.Errorf("preparing metadata batch: %w", err)
 	}
 	for _, r := range rows {
 		if err := batch.Append(
+			r.Fingerprint,
+			r.MetricType,
 			r.ResourceAttributes,
 			r.ResourceSchemaUrl,
 			r.ScopeName,
@@ -110,45 +119,30 @@ func (s *ClickHouseMetricsStore) InsertGauge(ctx context.Context, rows []GaugeRo
 			r.MetricDescription,
 			r.MetricUnit,
 			r.Attributes,
-			r.StartTimeUnix,
-			r.TimeUnix,
-			r.Value,
-			r.Flags,
+			r.AggregationTemporality,
+			r.IsMonotonic,
 		); err != nil {
-			return fmt.Errorf("appending gauge row: %w", err)
+			return fmt.Errorf("appending metadata row: %w", err)
 		}
 	}
 	return batch.Send()
 }
 
-// InsertSum batch-inserts sum rows into otel_metrics_sum.
-func (s *ClickHouseMetricsStore) InsertSum(ctx context.Context, rows []SumRow) error {
-	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO otel_metrics_sum")
+// InsertPoints batch-inserts datapoint rows into otel_metrics_point.
+func (s *ClickHouseMetricsStore) InsertPoints(ctx context.Context, rows []DataPoint) error {
+	batch, err := s.conn.PrepareBatch(ctx, "INSERT INTO otel_metrics_point")
 	if err != nil {
-		return fmt.Errorf("preparing sum batch: %w", err)
+		return fmt.Errorf("preparing points batch: %w", err)
 	}
 	for _, r := range rows {
 		if err := batch.Append(
-			r.ResourceAttributes,
-			r.ResourceSchemaUrl,
-			r.ScopeName,
-			r.ScopeVersion,
-			r.ScopeAttributes,
-			r.ScopeDroppedAttrCount,
-			r.ScopeSchemaUrl,
-			r.ServiceName,
-			r.MetricName,
-			r.MetricDescription,
-			r.MetricUnit,
-			r.Attributes,
+			r.Fingerprint,
 			r.StartTimeUnix,
 			r.TimeUnix,
 			r.Value,
 			r.Flags,
-			r.AggregationTemporality,
-			r.IsMonotonic,
 		); err != nil {
-			return fmt.Errorf("appending sum row: %w", err)
+			return fmt.Errorf("appending point row: %w", err)
 		}
 	}
 	return batch.Send()

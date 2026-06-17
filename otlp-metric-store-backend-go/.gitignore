@@ -1,1 +1,4 @@
 otlp-log-processor-backend
+
+# Hegel property-based testing cache / failure database
+.hegel/

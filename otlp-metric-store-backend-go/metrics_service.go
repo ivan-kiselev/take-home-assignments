@@ -23,18 +23,23 @@ func (m *dash0MetricsServiceServer) Export(ctx context.Context, request *colmetr
 	metricsReceivedCounter.Add(ctx, 1)
 
 	if m.store != nil {
-		rm := request.GetResourceMetrics()
+		metadata, points := MapMetrics(request.GetResourceMetrics())
 
-		if gaugeRows := MapGaugeRows(rm); len(gaugeRows) > 0 {
-			if err := m.store.InsertGauge(ctx, gaugeRows); err != nil {
+		// Insert metadata first so the lookup row exists before (or with) the
+		// datapoints that reference it.
+		if len(metadata) > 0 {
+			if err := m.store.InsertMetadata(ctx, metadata); err != nil {
 				return nil, err
 			}
 		}
-		if sumRows := MapSumRows(rm); len(sumRows) > 0 {
-			if err := m.store.InsertSum(ctx, sumRows); err != nil {
+		if len(points) > 0 {
+			if err := m.store.InsertPoints(ctx, points); err != nil {
 				return nil, err
 			}
 		}
+		slog.DebugContext(ctx, "stored metrics",
+			slog.Int("series", len(metadata)),
+			slog.Int("datapoints", len(points)))
 	}
 
 	return &colmetricspb.ExportMetricsServiceResponse{}, nil

@@ -1,0 +1,47 @@
+{
+  "label": "after",
+  "schema": "split (metadata lookup + datapoint references by fingerprint)",
+  "config": {
+    "Services": 20,
+    "MetricsPerService": 10,
+    "AttrCombosPerMetric": 10,
+    "DatapointsPerSeries": 200,
+    "DatapointsPerRequest": 100,
+    "Workers": 8
+  },
+  "total_series": 2000,
+  "total_datapoints": 400000,
+  "total_requests": 4000,
+  "ingest_seconds": 166.71244725,
+  "datapoints_per_sec": 2399.3409406327337,
+  "requests_per_sec": 23.993409406327338,
+  "rpc_latency_ms": {
+    "p50": 343.298,
+    "p95": 403.958,
+    "p99": 414.033,
+    "max": 624.99
+  },
+  "storage": [
+    {
+      "table": "otel_metrics_meta",
+      "rows": 2000,
+      "compressed_bytes": 32889,
+      "uncompressed_bytes": 408080
+    },
+    {
+      "table": "otel_metrics_point",
+      "rows": 400000,
+      "compressed_bytes": 670498,
+      "uncompressed_bytes": 12800837
+    }
+  ],
+  "total_compressed_bytes": 703387,
+  "total_uncompressed_bytes": 13208917,
+  "compressed_bytes_per_datapoint": 1.7584675,
+  "query_latency_ms": {
+    "p50": 7.176,
+    "p95": 19.588,
+    "p99": 19.588,
+    "max": 22.635
+  }
+}
